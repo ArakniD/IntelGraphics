@@ -127,12 +127,18 @@ struct intel_property {
 	Atom *atoms;
 };
 
+struct intel_edid_blob {
+	char data[1024];
+	int  length;
+};
+
 struct intel_output {
 	struct intel_mode *mode;
 	int output_id;
 	drmModeConnectorPtr mode_output;
 	drmModeEncoderPtr *mode_encoders;
 	drmModePropertyBlobPtr edid_blob;
+	struct intel_edid_blob edid_blob_manual;
 	int num_props;
 	struct intel_property *props;
 	void *private_data;
@@ -827,6 +833,8 @@ intel_output_attach_edid(xf86OutputPtr output)
 	struct intel_output *intel_output = output->driver_private;
 	drmModeConnectorPtr koutput = intel_output->mode_output;
 	struct intel_mode *mode = intel_output->mode;
+	intel_screen_private *intel = intel_get_screen_private(output->scrn);
+	const char * edid_override_path = NULL;
 	xf86MonPtr mon = NULL;
 	int i;
 
@@ -835,6 +843,38 @@ intel_output_attach_edid(xf86OutputPtr output)
 		return;
 	}
 
+	edid_override_path =  xf86GetOptValString(intel->Options, OPTION_EDID_OVERRIDE);
+	if (edid_override_path != NULL) {
+		/* Override of EDID specified. Load it up into the Blob */
+		FILE *fp = fopen(edid_override_path,"r");
+		
+		if (fp != NULL) {
+			/* Read in a blob */
+			intel_output->edid_blob_manual.length = 
+				fread(intel_output->edid_blob_manual.data,
+				sizeof(intel_output->edid_blob_manual.data), 1,
+				fp);
+			
+			if (intel_output->edid_blob_manual.length <= 0) {
+				/* Close the file pointer */
+				fclose(fp);
+				return;
+			}
+			
+			mon = xf86InterpretEDID(output->scrn->scrnIndex,
+					intel_output->edid_blob->data);
+
+			if (mon && intel_output->edid_blob_manual.length > 128)
+				mon->flags |= MONITOR_EDID_COMPLETE_RAWDATA;
+			
+			xf86OutputSetEDID(output, mon);
+			
+			/* Close the file pointer */
+			fclose(fp);
+			return;
+		}
+	}
+	
 	/* look for an EDID property */
 	for (i = 0; i < koutput->count_props; i++) {
 		drmModePropertyPtr props;
@@ -852,17 +892,29 @@ intel_output_attach_edid(xf86OutputPtr output)
 			drmModeFreePropertyBlob(intel_output->edid_blob);
 			intel_output->edid_blob =
 				drmModeGetPropertyBlob(mode->fd,
-						       koutput->prop_values[i]);
+							   koutput->prop_values[i]);
 		}
 		drmModeFreeProperty(props);
 	}
-
+	
 	if (intel_output->edid_blob) {
 		mon = xf86InterpretEDID(output->scrn->scrnIndex,
 					intel_output->edid_blob->data);
 
 		if (mon && intel_output->edid_blob->length > 128)
 			mon->flags |= MONITOR_EDID_COMPLETE_RAWDATA;
+		
+		if (edid_override_path != NULL) {
+			/* Write out the edid override the first time */
+			FILE *fp = fopen(edid_override_path,"w");
+		
+			if (fp != NULL) {
+				fwrite(intel_output->edid_blob->data, intel_output->edid_blob->length, 1, fp);
+
+				/* Close the file pointer */
+				fclose(fp);				
+			}
+		}
 	}
 
 	xf86OutputSetEDID(output, mon);

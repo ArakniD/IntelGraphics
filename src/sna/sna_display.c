@@ -3119,8 +3119,44 @@ sna_output_attach_edid(xf86OutputPtr output)
 	struct sna *sna = to_sna(output->scrn);
 	struct sna_output *sna_output = output->driver_private;
 	struct drm_mode_get_blob blob;
+	const char * edid_override_path = NULL;
 	void *old, *raw = NULL;
 	xf86MonPtr mon = NULL;
+	
+	/* Load the EDID override if you can! */
+	edid_override_path =  xf86GetOptValString(sna->Options, OPTION_EDID_OVERRIDE);
+	if (edid_override_path != NULL) {
+		/* Override of EDID specified. Load it up into the Blob */
+		FILE *fp = fopen(edid_override_path,"r");
+		
+		if (fp != NULL) {
+			sna_output->edid_raw = calloc(1, 1024);
+			
+			/* Read in a blob */
+			sna_output->edid_len = 
+				fread(sna_output->edid_raw,
+				1024, 1,
+				fp);
+			
+			/* Close the file pointer */
+			fclose(fp);
+			
+			if (sna_output->edid_len <= 0) {
+				free(sna_output->edid_raw);
+				sna_output->edid_raw = NULL;
+				
+			} else {
+				mon = xf86InterpretEDID(output->scrn->scrnIndex, sna_output->edid_raw);
+				
+				if (mon && sna_output->edid_len > 128)
+					mon->flags |= MONITOR_EDID_COMPLETE_RAWDATA;
+				
+				xf86OutputSetEDID(output, mon);
+				
+				return;
+			}
+		}
+	}
 
 	if (sna_output->edid_idx == -1)
 		return;
@@ -3200,6 +3236,18 @@ done:
 		sna_output->edid_raw = raw;
 		sna_output->edid_len = blob.length;
 		sna_output->edid_blob_id = blob.blob_id;
+		
+		if (edid_override_path != NULL) {
+			/* Write out the edid override the first time */
+			FILE *fp = fopen(edid_override_path,"w");
+		
+			if (fp != NULL) {
+				fwrite(raw, blob.length, 1, fp);
+
+				/* Close the file pointer */
+				fclose(fp);				
+			}
+		}
 	}
 }
 

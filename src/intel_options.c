@@ -42,6 +42,7 @@ const OptionInfoRec intel_options[] = {
 	{OPTION_DEBUG_WAIT, "DebugWait", OPTV_BOOLEAN, {0}, 0},
 	{OPTION_BUFFER_CACHE,	"BufferCache",	OPTV_BOOLEAN,   {0},    1},
 #endif
+	{OPTION_EDID_OVERRIDE,	"EDIDOverride",	OPTV_STRING,	{0},	0},
 	{-1,			NULL,		OPTV_NONE,	{0},	0}
 };
 
